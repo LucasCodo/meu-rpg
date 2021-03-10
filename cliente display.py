@@ -1,17 +1,29 @@
 import pygame
 import sys
-import _thread
 import pyautogui
 import json
 from datetime import datetime, timedelta
 from requests import Session
 import os
+import math
+import time
+import _thread
+from pygame import font
+from pygame import display
+from pygame.image import load
+from pygame.transform import scale
+from pygame.sprite import Sprite , Group, GroupSingle, groupcollide
+from pygame import event
+from pygame.locals import QUIT, KEYUP, K_SPACE
+from pygame.time import Clock
+
+pygame.init()
 requests = Session()
 host_port = 'http://127.0.0.1:8000'
 minimap_background = "cartographypack/Textures/parchmentFoldedCrinkled.png"
 pedra = "kenney_rpgurbanpack/Tiles/tile_0036.png"
 width, height= pyautogui.size()
-width, height = 800,600
+#width, height = 800,600
 speed_cam = 2
 class Camera():
     def __init__(self,width, height):
@@ -34,10 +46,14 @@ class Camera():
         self.travada = False
     def center_player(self,target):
         if not self.travada:
-            dx = self.x-abs(target.x)
-            dy = self.y-abs(target.y)
+            '''print(target.rect[2:])
+            print(self.x,self.y)'''
+            dx = self.x-target.rect.centerx
+            dy = self.y-target.rect.centery
             self.x = round(self.width/2)+dx
             self.y = round(self.height/2)+dy
+            '''self.x = round(self.width/2)-target.rect.center[0]
+            self.y = round(self.height/2)-target.rect.center[1]'''
 class Minimap():
     def __init__(self,cam,width,height):
         self.width = width
@@ -53,48 +69,81 @@ class Minimap():
         pass
 
 cam = Camera(width, height)
+nick = "Lucas"+str(datetime.now())
+class sprite_player(Sprite):
+    def __init__(self,x,y):
+        super().__init__()
+        
+        self.image = scale(load("cartographypack/Textures/parchmentFoldedCrinkled.png"),(80,80))
+        self._rect = self.image.get_rect(center=(x,y))
+        self.velocidade = 2
+    def update(self):
+        keys = pygame.key.get_pressed()
+        if keys[pygame.K_LEFT]:
+            message = requests.post(host_port+'/move',json={"nome":nick, "comando": "left"}).json()
+            self.setpos(message)
+            if cam.travada:
+                cam.left()
+        if keys[pygame.K_RIGHT]:
+            message = requests.post(host_port+'/move',json={"nome":nick, "comando": "right"}).json()
+            self.setpos(message)
+            if cam.travada:
+                cam.right()
+        if keys[pygame.K_UP]:
+            message = requests.post(host_port+'/move',json={"nome":nick, "comando": "up"}).json()
+            self.setpos(message)
+            if cam.travada:
+                cam.up()
+        if keys[pygame.K_DOWN]:
+            message = requests.post(host_port+'/move',json={"nome":nick, "comando": "down"}).json()
+            self.setpos(message)
+            if cam.travada:
+                cam.down()
+    def setpos(self,message):
+        self._rect = self.image.get_rect(center=(message["x"],message["y"]))
+    @property
+    def rect(self):
+        rect = self.image.get_rect(center=(self._rect.centerx+cam.x,self._rect.centery+cam.y))
+        return rect
+class sprite_other_player(Sprite):
+    def __init__(self,name,x,y):
+        super().__init__()
+        self.name = name
+        self.image = scale(load("cartographypack/Textures/parchmentFoldedCrinkled.png"),(80,80))
+        self._rect = self.image.get_rect(center=(x,y))
+        self.velocidade = 2
+    def update(self):
+        if self.name not in list_name_players:
+            self.kill()
+        else:
+            for a in players["players"]:
+                if a["name"] == self.name:
+                    self.setpos(a)
+            
+    def setpos(self,message):
+        self._rect = self.image.get_rect(center=(message["x"],message["y"]))
+    @property
+    def rect(self):
+        self._rect = self.image.get_rect(center=(self._rect.centerx+cam.x,self._rect.centery+cam.y))
+        return self._rect
 
-class player():
-    def __init__(self,name="",x=0,y=0):
-        self.name=name
-        self._x=x
-        self._y=y
-        #self.player = pygame.image.load(os.path.join(minimap_background)).convert_alpha()
-        #self.player = pygame.transform.scale(self.player, (80, 80))
-        pass
-    def draw(self,janela,cor=(255,0,0)):
-        #player.convert()
-        #janela.blit(self.player, (self.x,self.y))
-        pygame.draw.circle(janela, cor, (self.x, self.y), 50,1)
-        pass
-    def update(self,message):
-        if not message:
-            return
-        '''try:
-            json_msg = json.loads(message[0].decode())
-            dados = json_msg["data"]
-            for dado in dados:
-                name = dado["name"]
-                if name == self.name:
-                    self.x = 400+dado["x"]
-                    self.y = 400+dado["y"]
-        except json.decoder.JSONDecodeError:
-            print("Não foi possivel carregar a mensagem!")
-        except KeyError:
-            print("Não tem um nome!")'''
-        self._x = message["x"]
-        self._y = message["y"]
-        pass
-    @property
-    def x(self):
-        return self._x+cam.x
-    @property
-    def y(self):
-        return self._y+cam.y
-    
+d = round(math.dist([0,0],[width, height])/2)
+mapa = requests.get(host_port+'/mapa', params = {"x":-cam.x+cam.center[0],"y":-cam.y+cam.center[1],"d":d}).json()
+me = sprite_player(cam.x,cam.y)
+grupo_me = GroupSingle(me)
+grupo_players = Group()
+raio = d
+players = requests.get(host_port+'/players', params = {"nome":nick,"x":-cam.x+cam.center[0],"y":-cam.y+cam.center[1], "r":raio}).json()
+list_name_players = list(map(lambda x : x["name"],players["players"]))
+def update_mapa():
+    global mapa
+    while True:
+        #print("MAis um segundo")
+        mapa = requests.get(host_port+'/mapa', params = {"x":-cam.x+cam.center[0],"y":-cam.y+cam.center[1],"d":d}).json()
+        time.sleep(1)
 class Jogo():
     def __init__(self,nick,width, height,fps):
-        pygame.init()
+        
         #pygame.font.init()
         self._height=height
         self._width=width
@@ -104,7 +153,7 @@ class Jogo():
         self._lista_players=[]
         self._lista_inimigos=[]
         self._lista_projeteis=[]
-        self.me=player(nick,0,0)
+        #self.me=player(nick,0,0)
         
         self.myfont = pygame.font.SysFont('Comic Sans MS', 30)
         self.last_secund = datetime.now()
@@ -119,7 +168,7 @@ class Jogo():
         self.overlay_minimap = pygame.Surface((self._width,self._height), pygame.SRCALPHA)
         pass
     def run(self):
-        r = requests.post(host_port+'/conect',json={"nome":self.me.name}).json()
+        r = requests.post(host_port+'/conect',json={"nome":nick}).json()
         print(r)
         while True:
             self.pre_frame = datetime.now()
@@ -136,48 +185,8 @@ class Jogo():
             self.cont_fps+=1
             
             self._janela.fill((200,200,200))
-            #pygame.draw.circle(self._janela, (255,255,255), (150, 150), 50,1)
-            #pygame.draw.rect(self._janela, (255,255,255), (150,150,150, 150), 5)
-            #if event.type == pygame.KEYDOWN:
-            '''if comandos[pygame.K_UP]:
-                self.c.send_command('up')
-            if comandos[pygame.K_DOWN]:
-                self.c.send_command('down')
-            if comandos[pygame.K_RIGHT]:
-                self.c.send_command('right')
-            if comandos[pygame.K_LEFT]:
-                self.c.send_command('left')
-            message = self.c.msgFromServer
-            #self.me.draw(self._janela)
-            for player in self._lista_players:
-                player.draw(self._janela,(0,255,0))
-            self.is_new_player(message)
-            #self.me.update(message)'''
-            #r = requests.get('http://127.0.0.1:8000/players').json()
-            #print(r)
-            #self._janela.blit(self.pedra, (400,400))
+
             self.draw_map()
-            self.me.draw(self._janela)
-            if comandos[pygame.K_UP]:
-                r = requests.post(host_port+'/move',json={"nome":self.me.name, "comando": "up"}).json()
-                self.me.update(r)
-                if cam.travada:
-                    cam.up()
-            if comandos[pygame.K_DOWN]:
-                r = requests.post(host_port+'/move',json={"nome":self.me.name, "comando": "down"}).json()
-                self.me.update(r)
-                if cam.travada:
-                    cam.down()
-            if comandos[pygame.K_RIGHT]:
-                r= requests.post(host_port+'/move',json={"nome":self.me.name, "comando": "right"}).json()
-                self.me.update(r)
-                if cam.travada:
-                    cam.right()
-            if comandos[pygame.K_LEFT]:
-                r = requests.post(host_port+'/move',json={"nome":self.me.name, "comando": "left"}).json()
-                self.me.update(r)
-                if cam.travada:
-                    cam.left()
             if event.type == pygame.KEYDOWN:
                 if comandos[pygame.K_y]:
                     if cam.travada:
@@ -185,9 +194,9 @@ class Jogo():
                     else:
                         cam.travar()
             if comandos[pygame.K_SPACE]:
-                self.construir(self.me.x,self.me.y)
+                self.construir(me.rect.x,me.rect.y)
             if comandos[pygame.K_c]:
-                cam.center_player(self.me)
+                cam.center_player(me)
             ##
             if not cam.travada:
                 if comandos[pygame.K_w]:
@@ -198,54 +207,65 @@ class Jogo():
                     cam.right()
                 if comandos[pygame.K_a]:
                     cam.left()
-            ##
-            for player in self._lista_players:
-                player.draw(self._janela,(0,255,0))
+
             self.other_players()
-            #self.me.update(message)
             self._janela.blit(self.contador_fps,(400,0))
             self._janela.blit(self.myfont.render(str(round(self.frame_time.microseconds/1000)), False, (255, 255, 255)),(500,0))
-
-            
+            grupo_players.draw(self._janela)
+            grupo_players.update()
+            grupo_me.draw(self._janela)
+            grupo_me.update()
             pygame.display.update()
-            self._relogio.tick(self._fps)
             self.frame_time = datetime.now()-self.pre_frame
+            self._relogio.tick(self._fps)
+            
         pygame.quit()
         sys.exit()
         
         pass
     def other_players(self):
-        r = requests.get(host_port+'/players').json()
-        for a in r["players"]:
+        players = requests.get(host_port+'/players', params = {"nome":nick,"x":-cam.x+cam.center[0],"y":-cam.y+cam.center[1], "r":raio}).json()
+        list_name_players = list(map(lambda x : x["name"],players["players"]))
+        list_group_players_name = list(map(lambda x : x.name,grupo_players))
+        for a in players["players"]:
             #print(a)
-            if a["name"] != self.me.name and a["name"] not in list(map(lambda x : x.name,self._lista_players)):
-                self._lista_players.append(player(a["name"],a["x"],a["y"]))
-            else:
-                for p in self._lista_players:
-                    if a["name"] == p.name:
-                        p.update(a)
+            if a["name"] == nick:
+                me.setpos(a)
+            elif a["name"] not in list_group_players_name:
+                #self._lista_players.append(player(a["name"],a["x"],a["y"]))
+                grupo_players.add(sprite_other_player(a["name"],a["x"],a["y"]))
+                
+                
     def draw_map(self):
-        i = datetime.now()
-        r = requests.get(host_port+'/mapa', params = {"x":-cam.x+cam.center[0],"y":-cam.y+cam.center[1],"d":400}).json()
-        f = datetime.now() - i
-        #print(r)
-        terrenos = r["mapa"]["terrenos"]
-        #print(f.microseconds, len(terrenos))
+        #i = datetime.now()
+        #d = round(math.dist([0,0],[width, height])/2)
+        #r = requests.get(host_port+'/mapa', params = {"x":-cam.x+cam.center[0],"y":-cam.y+cam.center[1],"d":d}).json()
+        
+        terrenos = mapa["mapa"]["terrenos"]
+        redut = 8
         for t in terrenos:
             self._janela.blit(self.pedra, (cam.x+t["x"],cam.y+t["y"]))
+        
         self.draw_mini_map(terrenos)
+        #f = datetime.now() - i
+        #print(f.microseconds, len(terrenos))
         pass
     def draw_mini_map(self,terrenos):
         
         self.overlay_minimap.fill((0,0,0,160))
+        redut = 8
         
-        
-        #self.minimap.draw(self._janela)
         for t in terrenos:
-            x = self.minimap.x+round(t["x"]/8)+round(cam.x/8)
-            y = self.minimap.y+round(t["y"]/8)+round(cam.y/8)
-            #if x >= self.minimap.x-5 and y >= self.minimap.y-5:
-            pygame.draw.rect(self.overlay_minimap, (0,0,0), (x,y,10,10))
+            x = self.minimap.x+round(t["x"]/redut)+round(cam.x/redut)
+            y = self.minimap.y+round(t["y"]/redut)+round(cam.y/redut)
+            pygame.draw.rect(self.overlay_minimap, (0,0,255), (x,y,10,10))
+        for p in grupo_players:
+            x = self.minimap.x+round(p._rect.centerx/redut)+round(cam.x/8)
+            y = self.minimap.y+round(p._rect.centery/redut)+round(cam.y/8)
+            pygame.draw.rect(self.overlay_minimap, (0,255,0), (x,y,2,2))
+        x = self.minimap.x+round(me._rect.centerx/redut)+round(cam.x/8)
+        y = self.minimap.y+round(me._rect.centery/redut)+round(cam.y/8)
+        pygame.draw.rect(self.overlay_minimap, (255,0,0), (x,y,2,2))
         pygame.draw.rect(self.overlay_minimap,(255,255,255,0),[0,0,self._width-self.minimap.width,self._height])
         pygame.draw.rect(self.overlay_minimap,(255,255,255,0),[0,0,self._width,self._height-self.minimap.height])
         self.overlay_minimap.set_colorkey((255,255,255))
@@ -257,13 +277,7 @@ class Jogo():
         
 
 if __name__=="__main__":
-    #print(width, height)
-    jogo = Jogo("Lucas"+str(datetime.now()),width, height,60)
+    _thread.start_new_thread(update_mapa,())
+    jogo = Jogo(nick,width, height,120)
     jogo.run()
-    '''se = requests.Session()
-    try:
-        while True:
-            r = se.get('http://127.0.0.1:8000/')
-            #print(r.json())
-    except:
-        print("DEU RUIM!!!")'''
+    _thread.exit()

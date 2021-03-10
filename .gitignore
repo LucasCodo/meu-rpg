@@ -54,3 +54,5 @@ dkms.conf
 *.tmx
 *.tsx
 *.swf
+*.db
+*.pyc

@@ -5,7 +5,16 @@ import copy
 import math
 import numpy as np
 from collections import namedtuple
+from datetime import datetime, timedelta
 
+def mostra_tempo(func):
+    def wrapper(x:int,y:int,d:int):
+        i = datetime.now()
+        r= func(x,y,d)
+        f = datetime.now()-i
+        print("Demorou:",f)
+        return r
+    return wrapper
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
@@ -77,6 +86,7 @@ class Mapa():
         self.terrenos=[]
         self.criaturas=[]
         self.items=[]
+        self.players=[]
         self.construcoes=[]
     def add_terreno(self,terreno:Terreno):
         self.terrenos.append(terreno)
@@ -129,9 +139,6 @@ class player():
 
 clientes = {}
 _mapa = Mapa()
-#for a in range(10000000001):
-#    _mapa.add_terreno({"tipo":"pedra","x":np.random.randint(0,1000000000),"y":np.random.randint(0,1000000000)})
-#terreno = namedtuple('Terreno',['tipo','x','y'])
 
 m = copy.deepcopy(_mapa)
 list(map(lambda x : _mapa.add_terreno(terreno("pedra",np.random.randint(0,10000),np.random.randint(0,10000))),range(10001)))
@@ -152,12 +159,16 @@ def conect_player(c:Cli):
     clientes[c.nome]= p
     return clientes[c.nome]
 @app.get("/players")
-def players():
-    return {"players":list(map(lambda x : x,clientes.values()))}#{"players":list(map(lambda x : x.json(),clientes.values()))}
+def players(nome:str,x:int,y:int,r:int):
+    _players = list(filter(lambda c: c if math.dist((x,y),(c.x,c.y))<r or c.name == nome else "",clientes.values()))
+    return {"players":_players}#{"players":list(map(lambda x : x.json(),clientes.values()))}
 @app.get("/mapa")
-def mapa(x:int,y:int,d:int):
-    m.terrenos = list(filter(lambda t: t if math.dist((x,y),(t.x,t.y))<d else "",_mapa.terrenos))
-    #print(m.terrenos)
+def mapa(x:int,y:int,r:int):
+    m.terrenos = list(filter(lambda t: t if math.dist((x,y),(t.x,t.y))<r else "",_mapa.terrenos))
+    m.items = m.terrenos
+    m.construcoes = m.terrenos
+    m.criaturas = m.terrenos
+    m.players = m.terrenos
     return {"mapa":m}
 @app.post("/construir/terreno")
 def construir_terreno(terreno:Terreno):
